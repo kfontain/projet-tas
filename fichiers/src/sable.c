@@ -322,17 +322,17 @@ unsigned sable_compute_ompfor (unsigned nb_iter) {
         #pragma omp parallel
         #pragma omp for
             for (int j = 1; j <= DIM - 2; j+=3) {
-                traiter_tuile3(j, 1, j, DIM - 2);
+                traiter_tuile2(j, 1, j, DIM - 2);
             }
 
         #pragma omp for
             for (int j = 2; j <= DIM - 2; j+=3) {
-                traiter_tuile3(j, 1, j, DIM - 2);
+                traiter_tuile2(j, 1, j, DIM - 2);
             }
 
         #pragma omp for
             for (int j = 3; j <= DIM - 2; j+=3) {
-                traiter_tuile3(j, 1, j, DIM - 2);
+                traiter_tuile2(j, 1, j, DIM - 2);
             }
 
         if (changement == 0) return it;
@@ -340,36 +340,15 @@ unsigned sable_compute_ompfor (unsigned nb_iter) {
     return 0;
 }
 
-/* Version parallèle tuilées omp for */
-/*
-unsigned sable_compute_tiled_ompfor (unsigned nb_iter) {
-    tranche = DIM / GRAIN;
-    
-    #pragma omp parallel
-    for (unsigned it = 1; it <= nb_iter; it ++) {
-        for (int mod=0; mod<3; mod++) {
-            #pragma omp for schedule(static)
-            // On itére sur les coordonnées des tuiles
-                for (int i=0; i < GRAIN; i++)
-                    for (int j=0; j < GRAIN; j++) {
-                        traiter_tuile (i == 0 ? 1 : (i * tranche) /* i debut *///,
-                    //    j == 0 ? 1 : (j * tranche) /* j debut */,
-                    //    (i + 1) * tranche - 1 - (i == GRAIN-1)/* i fin */,
-                      //  (j + 1) * tranche - 1 - (j == GRAIN-1)/* j fin */);
-                   // }
-     //   }
-  //  }
-   // return 0;
-//}
-
 unsigned sable_compute_ompfor_tiled (unsigned nb_iter) {
     tranche = DIM / GRAIN;
-    #pragma omp paralell
     for (unsigned it = 1; it <= nb_iter; it ++) {
-        for (int mod=0; mod<3; mod++){
-            #pragma omp for schedule(static)
+        for (int mod=0; mod<3; mod++) {
+            changement = 0;
+#pragma omp parallel
+            #pragma omp for
             // On itére sur les coordonnées des tuiles
-            for (int i=0; i < GRAIN; i++)
+            for (int i=0; i < GRAIN; i++) {
                 for (int j=0; j < GRAIN; j++) {
                     traiter_tuile (i == 0 ? 1 : (i * tranche) /* i debut */,
                     j == 0 ? 1 : (j * tranche) /* j debut */,
@@ -377,6 +356,8 @@ unsigned sable_compute_ompfor_tiled (unsigned nb_iter) {
                     (j + 1) * tranche - 1 - (j == GRAIN-1)/* j fin */);
                 }
             }
+        }
+        if (changement == 0) return it;
     }
     return 0;
 }
