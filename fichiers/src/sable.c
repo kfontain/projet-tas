@@ -9,7 +9,8 @@
 
 static long unsigned int *TABLE=NULL;
 
-static volatile int changement ;
+static volatile int changement;
+static volatile int changement_tile;
 
 static unsigned long int max_grains;
 
@@ -28,7 +29,7 @@ void sable_finalize()
  }
 
 
-///////////////////////////// Production d'une image 
+///////////////////////////// Production d'une image
 void sable_refresh_img()
 {
   unsigned long int max = 0;
@@ -48,7 +49,7 @@ void sable_refresh_img()
 	      r = v = b = 255 ;
 	    else if (g > 4)
 	      r = b = 255 - (240 * ((double) g) / (double) max_grains);
-	    
+
 	    cur_img (i,j) = RGB(r,v,b);
 	    if (g > max)
 	      max = g;
@@ -66,15 +67,15 @@ void sable_draw (char *param)
 {
   char func_name [1024];
   void (*f)(void) = NULL;
-  
+
   sprintf (func_name, "draw_%s", param);
   f = dlsym (DLSYM_FLAG, func_name);
-  
+
   if (f == NULL) {
     printf ("Cannot resolve draw function: %s\n", func_name);
     f = sable_draw_4partout;
   }
-  
+
   f ();
 }
 
@@ -117,13 +118,14 @@ static inline void compute_new_state (int y, int x)
       table(y+1,x)+=div4;
       table(y,x)%=4;
       changement = 1;
-    }  
+      changement_tile = 1;
+    }
 }
 
 static void traiter_tuile (int i_d, int j_d, int i_f, int j_f)
 {
   PRINT_DEBUG ('c', "tuile [%d-%d][%d-%d] traitée\n", i_d, i_f, j_d, j_f);
-  
+
   for (int i = i_d; i <= i_f; i++)
     for (int j = j_d; j <= j_f; j++)
       compute_new_state (i, j);
@@ -132,7 +134,7 @@ static void traiter_tuile (int i_d, int j_d, int i_f, int j_f)
 // Renvoie le nombre d'itérations effectuées avant stabilisation, ou 0
 unsigned sable_compute_seq (unsigned nb_iter)
 {
- 
+
   for (unsigned it = 1; it <= nb_iter; it ++) {
     changement = 0;
     // On traite toute l'image en un coup (oui, c'est une grosse tuile)
@@ -147,18 +149,21 @@ unsigned sable_compute_seq (unsigned nb_iter)
 static void traiter_tuile2 (int i_d, int j_d, int i_f, int j_f) {
 
     PRINT_DEBUG ('c', "tuile [%d-%d][%d-%d] traitée\n", i_d, i_f, j_d, j_f);
-  
+
+    int modj = (j_f - (j_d + 1)) % 2;
+
     for (int i = i_d; i <= i_f; i++) {
-        for (int j = j_d; j <= j_f; j+=2) {
+        for (int j = j_d; j <= j_f - modj; j+=2) {
             compute_new_state (i, j);
             compute_new_state (i, j+1);
         }
+        if (modj ==1 ) compute_new_state (i, j_f);
     }
 }
 
 unsigned sable_compute_seq2 (unsigned nb_iter)
 {
- 
+
   for (unsigned it = 1; it <= nb_iter; it+=2) {
     changement = 0;
     traiter_tuile2 (1, 1, DIM - 2, DIM - 2);
@@ -172,8 +177,6 @@ unsigned sable_compute_seq2 (unsigned nb_iter)
 static void traiter_tuile3 (int i_d, int j_d, int i_f, int j_f) {
 
     PRINT_DEBUG ('c', "tuile [%d-%d][%d-%d] traitée\n", i_d, i_f, j_d, j_f);
-
-    
 
     int mod = (j_f - j_d + 1) % 3;
     for (int i = i_d; i <= i_f; i++) {
@@ -191,7 +194,7 @@ static void traiter_tuile3 (int i_d, int j_d, int i_f, int j_f) {
 
 unsigned sable_compute_seq3 (unsigned nb_iter)
 {
- 
+
   for (unsigned it = 1; it <= nb_iter; it+=3) {
     changement = 0;
     traiter_tuile3 (1, 1, DIM - 2, DIM - 2);
@@ -205,8 +208,6 @@ unsigned sable_compute_seq3 (unsigned nb_iter)
 static void traiter_tuile4 (int i_d, int j_d, int i_f, int j_f) {
 
     PRINT_DEBUG ('c', "tuile [%d-%d][%d-%d] traitée\n", i_d, i_f, j_d, j_f);
-
-    
 
     int mod = (j_f - j_d + 1) % 4;
     for (int i = i_d; i <= i_f; i++) {
@@ -226,7 +227,7 @@ static void traiter_tuile4 (int i_d, int j_d, int i_f, int j_f) {
 
 unsigned sable_compute_seq4 (unsigned nb_iter)
 {
- 
+
   for (unsigned it = 1; it <= nb_iter; it+=3) {
     changement = 0;
     traiter_tuile4 (1, 1, DIM - 2, DIM - 2);
@@ -253,7 +254,7 @@ static void traiter_tuilegcc (int i_d, int j_d, int i_f, int j_f) {
 
 unsigned sable_compute_seqgcc (unsigned nb_iter)
 {
- 
+
   for (unsigned it = 1; it <= nb_iter; it+=3) {
     changement = 0;
     traiter_tuilegcc (1, 1, DIM - 2, DIM - 2);
@@ -274,7 +275,7 @@ static unsigned tranche = 0;
 unsigned sable_compute_tiled (unsigned nb_iter)
 {
   tranche = DIM / GRAIN;
-  
+
   for (unsigned it = 1; it <= nb_iter; it ++) {
 
     // On itére sur les coordonnées des tuiles
@@ -287,34 +288,100 @@ unsigned sable_compute_tiled (unsigned nb_iter)
 			 (j + 1) * tranche - 1 - (j == GRAIN-1)/* j fin */);
 	}
   }
-  
+
   return 0;
 }
 
+/* Version récursive tuilée */
+
+unsigned int MAX_DEPTH = 32;
+
+static void traiter_tuile_rec(int i, int j, int tranche, int depth) {
+    if (i<0 || i>=GRAIN || j<0 || j>=GRAIN) return;
+
+    int tmp = 0;
+    int i_d = i == 0 ? 1 : (i * tranche); /* i debut */
+    int i_f = (i + 1) * tranche - 1 - (i == GRAIN-1); /* i fin */
+    int j_d = j == 0 ? 1 : (j * tranche); /* j debut */
+    int j_f = (j + 1) * tranche - 1 - (j == GRAIN-1);/* j fin */
+    PRINT_DEBUG ('c', "tuile [%d-%d][%d-%d] traitée\n", i_d, i_f, j_d, j_f);
+
+    do {
+        changement = 0;
+        traiter_tuile2(i_d, j_d, i_f, j_f);
+        if (changement == 1) tmp = 1;
+    } while (changement == 1);
+
+    if(tmp == 1 && depth < MAX_DEPTH){
+    traiter_tuile_rec(i, j+1, tranche, ++depth);
+    traiter_tuile_rec(i, j-1, tranche, ++depth);
+    traiter_tuile_rec(i-1, j, tranche, ++depth);
+    traiter_tuile_rec(i+1, j, tranche, ++depth);
+  }
+}
+
+unsigned sable_compute_rec_tiled(unsigned nb_iter) {
+    tranche = DIM / GRAIN;
+    int depth = 0;
+
+    for (unsigned it = 1; it <= nb_iter; it ++) {
+        changement_tile = 0;
+        for (int i=0; i < GRAIN; i++) {
+            for (int j=0; j < GRAIN; j++) {
+                traiter_tuile_rec(i, j, tranche, depth);
+            }
+        }
+        if(changement_tile == 0) return it;
+    }
+    return 0;
+}
 
 /* Version parallèle lignes omp task */
-unsigned sable_compute_omptask (unsigned nb_iter) {
-    unsigned int tmp = 0;
+unsigned sable_compute_omptask_line(unsigned nb_iter) {
+    unsigned tmp = 0;
+    tranche = DIM / GRAIN;
+    int i = 0;
     #pragma omp parallel
     #pragma omp single
     for (unsigned it = 1; it <= nb_iter && tmp == 0; it++) {
         changement = 0;
-        for (int i = 0; i < 2; i++) {
-            for (int j = 1; j <= DIM - 2; j++) {
-                if (j%3 == i) {
-                    #pragma omp task
-                    traiter_tuile(j, 1, j, DIM - 2); 
+        for (i = 0; i < GRAIN; i += 3) {
+            #pragma omp task firstprivate(i, changement) depend(out : table(i, 0))
+            {
+                for (int j = 0; j < GRAIN; j++) {
+                    traiter_tuile2(i == 0 ? 1 : (i * tranche) /* i debut */,
+                                   j == 0 ? 1 : (j * tranche) /* j debut */,
+                                  (i + 1) * tranche - 1 - (i == GRAIN - 1) /* i fin */,
+                                  (j + 1) * tranche - 1 - (j == GRAIN - 1) /* j fin */);
                 }
             }
-        #pragma omp taskwait
         }
-        if (changement == 0) tmp = it;
+    for (int k = 1; k < 3; k++) {
+        for (i = k; i < GRAIN; i += 3) {
+            #pragma omp task firstprivate(i, changement) depend(in : table(i - 1, 0), table(i + 2, 0)) depend(out : table(i, 0))
+            {
+                for (int j = 0; j < GRAIN; j++) {
+                    traiter_tuile2(i == 0 ? 1 : (i * tranche) /* i debut */,
+                                   j == 0 ? 1 : (j * tranche) /* j debut */,
+                                  (i + 1) * tranche - 1 - (i == GRAIN - 1) /* i fin */,
+                                  (j + 1) * tranche - 1 - (j == GRAIN - 1) /* j fin */);
+                }
+            }
+        }
+    }
+    #pragma omp taskwait
+    if (changement == 0) tmp = it;
     }
     return tmp;
 }
 
-/* Version parallèle lignes omp for */
-unsigned sable_compute_ompfor (unsigned nb_iter) {
+/* Version parallele en ligne omp for
+ * Découpage en ligne :
+ * 111
+ * 222
+ * 333
+ */
+unsigned sable_compute_ompfor_line (unsigned nb_iter) {
 
     for (unsigned it = 1; it <= nb_iter; it++) {
         changement = 0;
@@ -340,26 +407,70 @@ unsigned sable_compute_ompfor (unsigned nb_iter) {
     return 0;
 }
 
-unsigned sable_compute_ompfor_tiled (unsigned nb_iter) {
+/* Version parallele tuilee omp for
+ * Découpage en :
+ * 123
+ * 456
+ * 789
+ */
+unsigned sable_compute_ompfor_tiled33 (unsigned nb_iter) {
     tranche = DIM / GRAIN;
-    for (unsigned it = 1; it <= nb_iter; it ++) {
-        for (int mod=0; mod<3; mod++) {
-            changement = 0;
-#pragma omp parallel
-            #pragma omp for
-            // On itére sur les coordonnées des tuiles
-            for (int i=0; i < GRAIN; i++) {
-                for (int j=0; j < GRAIN; j++) {
-                    traiter_tuile (i == 0 ? 1 : (i * tranche) /* i debut */,
-                    j == 0 ? 1 : (j * tranche) /* j debut */,
-                    (i + 1) * tranche - 1 - (i == GRAIN-1)/* i fin */,
-                    (j + 1) * tranche - 1 - (j == GRAIN-1)/* j fin */);
+    unsigned tmp = 0; //Contourne GCC
+    #pragma omp parallel
+    for (unsigned it = 1; it <= nb_iter && tmp == 0; it++) {
+        changement = 0;
+        for (int modi = 0; modi < 3; modi++) {
+            for (int modj = 0; modj < 3; modj++) {
+            #pragma omp for collapse(2)
+                for (int i = modi; i < GRAIN; i+=3) {
+                    for (int j = modj; j < GRAIN; j+=3) {
+
+                        traiter_tuile2 (i == 0 ? 1 : (i * tranche) /* i debut */,
+                                        j == 0 ? 1 : (j * tranche) /* j debut */,
+                                       (i + 1) * tranche - 1 - (i == GRAIN-1)/* i fin */,
+                                       (j + 1) * tranche - 1 - (j == GRAIN-1)/* j fin */);
+                    }
                 }
             }
         }
-        if (changement == 0) return it;
+        if (changement == 0) tmp = it;
     }
-    return 0;
+    return tmp;
+}
+
+/*
+ * 1234
+ * 5678
+ * 3412
+ * 7856
+ */
+
+unsigned sable_compute_ompfor_tiled44(unsigned nb_iter)
+{
+  tranche = DIM / GRAIN;
+
+  for (unsigned it = 1; it <= nb_iter; it ++) {
+    changement = 0;
+    #pragma omp parallel
+    for (int modi = 0; modi < 2; modi++){
+      for (int modj = 0; modj < 4; modj++){
+        #pragma omp for schedule(static)
+        // On itére sur les coordonnées des tuiles
+        for (int i=modi; i < GRAIN; i+=2)
+        for (int j=(modj+i%4)%4; j < GRAIN; j+=4){
+          traiter_tuile (i == 0 ? 1 : (i * tranche) /* i debut */,
+          j == 0 ? 1 : (j * tranche) /* j debut */,
+          (i + 1) * tranche - 1 - (i == GRAIN-1)/* i fin */,
+          (j + 1) * tranche - 1 - (j == GRAIN-1)/* j fin */);
+        }
+      }
+    }
+    if (changement == 0){
+      return it;
+    }
+  }
+
+  return 0;
 }
 
 ///////////////////////////// Version utilisant un ordonnanceur maison (sched)
@@ -438,7 +549,7 @@ static void compute_task (void *p, unsigned proc)
   int i, j;
 
   unpack (p, &i, &j);
-  
+
   //PRINT_DEBUG ('s', "Compute Task is running on tile (%d, %d) over cpu #%d\n", i, j, proc);
 	  traiter_tuile (i == 0 ? 1 : (i * tranche) /* i debut */,
 			 j == 0 ? 1 : (j * tranche) /* j debut */,
@@ -455,13 +566,12 @@ unsigned sable_compute_sched (unsigned nb_iter)
     for (int i = 0; i < GRAIN; i++)
       for (int j = 0; j < GRAIN; j++)
 	create_task (compute_task, i, j);
-    
+
     scheduler_task_wait ();
 
     if (changement == 0)
       return it;
   }
-  
+
   return 0;
 }
-
